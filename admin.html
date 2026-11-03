@@ -1,0 +1,1130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>School Attendance - Admin Console</title>
+
+  <!-- Supabase JS Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    :root {
+      --bg-body: #f8fafc;
+      --bg-card: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border-color: #e2e8f0;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success: #16a34a;
+      --success-bg: #dcfce7;
+      --warning: #d97706;
+      --warning-bg: #fef3c7;
+      --danger: #dc2626;
+      --danger-bg: #fee2e2;
+      --purple: #7e22ce;
+      --purple-bg: #f3e8ff;
+      --indigo: #4f46e5;
+      --indigo-bg: #e0e7ff;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-body);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+    }
+
+    /* Modal / Overlay */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 16px;
+    }
+
+    .modal-card {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      padding: 32px 24px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: var(--shadow-xl);
+      text-align: center;
+    }
+
+    .modal-card.wide {
+      max-width: 480px;
+      text-align: left;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .modal-icon-circle {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: #eff6ff;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin: 0 auto 16px auto;
+    }
+
+    .modal-icon-circle.warning {
+      background: var(--warning-bg);
+      color: var(--warning);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* Form Inputs & Buttons */
+    input, select {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      background: #ffffff;
+      color: var(--text-main);
+    }
+
+    input:focus, select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 9px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+
+    .btn-primary { background: var(--primary); color: #ffffff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+
+    .btn-success { background: var(--success); color: #ffffff; }
+    .btn-success:hover { background: #15803d; }
+
+    .btn-warning { background: var(--warning); color: #ffffff; }
+    .btn-warning:hover { background: #b45309; }
+
+    .btn-outline { background: transparent; border-color: var(--border-color); color: var(--text-main); }
+    .btn-outline:hover { background: #f1f5f9; }
+
+    .btn-danger-light { background: var(--danger-bg); color: var(--danger); }
+    .btn-danger-light:hover { background: #fecaca; }
+
+    /* Navbar */
+    header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border-color);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .nav-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+    }
+
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      background: var(--primary);
+      color: #ffffff;
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      margin-right: 6px;
+    }
+
+    /* Main Container */
+    main {
+      max-width: 1400px;
+      margin: 24px auto;
+      padding: 0 20px;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .stat-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .stat-val {
+      font-size: 26px;
+      font-weight: 800;
+      margin-top: 4px;
+      line-height: 1;
+    }
+
+    .stat-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    /* Classified Two-Column Feed Layout */
+    .feeds-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    @media (max-width: 900px) {
+      .feeds-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      height: 450px;
+      overflow: hidden;
+    }
+
+    .panel-card.full-width {
+      height: auto;
+      min-height: 400px;
+    }
+
+    .panel-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #fafafa;
+    }
+
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    /* Live Feed Items */
+    .log-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .log-item:hover {
+      background: #f8fafc;
+    }
+
+    .user-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 13px;
+      margin-right: 12px;
+      flex-shrink: 0;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: capitalize;
+    }
+
+    .badge-ontime { background: var(--success-bg); color: var(--success); }
+    .badge-late { background: var(--warning-bg); color: var(--warning); }
+    .badge-override { background: var(--purple-bg); color: var(--purple); }
+    .badge-staff { background: var(--indigo-bg); color: var(--indigo); }
+    .badge-student { background: #dbeafe; color: #1e40af; }
+
+    /* Directory Tabs & Table */
+    .tabs-wrap {
+      display: flex;
+      gap: 6px;
+      background: #e2e8f0;
+      padding: 3px;
+      border-radius: var(--radius-sm);
+    }
+
+    .tab-btn {
+      border: none;
+      background: transparent;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: all 0.15s ease;
+    }
+
+    .tab-btn.active {
+      background: #ffffff;
+      color: var(--text-main);
+      box-shadow: var(--shadow-sm);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th {
+      background: #f8fafc;
+      padding: 12px 16px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      position: sticky;
+      top: 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 13px;
+    }
+
+    tr:hover td {
+      background: #f8fafc;
+    }
+
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ======================== LOGIN MODAL ======================== -->
+  <div id="login-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-icon-circle">
+        <i class="fa-solid fa-lock"></i>
+      </div>
+      <h2 style="font-size: 20px; font-weight: 800; margin-bottom: 4px;">Admin Verification</h2>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Enter Master Terminal PIN to access dashboard</p>
+      
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <input 
+          type="password" 
+          id="pin-input" 
+          maxlength="8" 
+          placeholder="••••" 
+          style="text-align: center; font-size: 24px; letter-spacing: 6px; font-family: monospace; margin-bottom: 14px;"
+          required 
+          autofocus
+        />
+        <p id="login-error" style="color: var(--danger); font-size: 13px; margin-bottom: 12px; font-weight: 600;" class="hidden"></p>
+        <button type="submit" id="login-btn" class="btn btn-primary" style="width: 100%; padding: 12px;">
+          <span>Unlock Dashboard</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================== MAIN APPLICATION ======================== -->
+  <div id="app-container" class="hidden">
+    <!-- Navbar -->
+    <header>
+      <div class="nav-container">
+        <div class="brand-wrap">
+          <div class="brand-icon">
+            <i class="fa-solid fa-id-card-clip"></i>
+          </div>
+          <div>
+            <h1 style="font-size: 16px; font-weight: 800;">School Attendance Terminal</h1>
+            <p style="font-size: 11px; color: var(--text-muted); display: flex; align-items: center;">
+              <span class="status-dot"></span> Live Cloud Sync Active
+            </p>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+          <button type="button" onclick="openPinModal()" class="btn btn-outline">
+            <i class="fa-solid fa-key" style="color: var(--text-muted);"></i> Change PIN
+          </button>
+          <button type="button" onclick="exportTodayCSV()" class="btn btn-success">
+            <i class="fa-solid fa-file-excel"></i> Export Today's CSV
+          </button>
+          <button type="button" onclick="handleLogout()" class="btn btn-danger-light" title="Logout">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main>
+      <!-- Stats Cards Row -->
+      <section class="stats-grid">
+        <div class="stat-card">
+          <div>
+            <p class="stat-title">Students Present</p>
+            <h3 id="stat-students" class="stat-val" style="color: var(--primary);">0</h3>
+          </div>
+          <div class="stat-icon" style="background: #eff6ff; color: var(--primary);">
+            <i class="fa-solid fa-graduation-cap"></i>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div>
+            <p class="stat-title">Staff Present</p>
+            <h3 id="stat-staff" class="stat-val" style="color: var(--indigo);">0</h3>
+          </div>
+          <div class="stat-icon" style="background: var(--indigo-bg); color: var(--indigo);">
+            <i class="fa-solid fa-user-tie"></i>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div>
+            <p class="stat-title">On-Time Total</p>
+            <h3 id="stat-ontime" class="stat-val" style="color: var(--success);">0</h3>
+          </div>
+          <div class="stat-icon" style="background: var(--success-bg); color: var(--success);">
+            <i class="fa-solid fa-circle-check"></i>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div>
+            <p class="stat-title">Late Total</p>
+            <h3 id="stat-late" class="stat-val" style="color: var(--warning);">0</h3>
+          </div>
+          <div class="stat-icon" style="background: var(--warning-bg); color: var(--warning);">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div>
+            <p class="stat-title">Telegram Paired</p>
+            <h3 id="stat-telegram" class="stat-val" style="color: #0284c7;">0</h3>
+          </div>
+          <div class="stat-icon" style="background: #e0f2fe; color: #0284c7;">
+            <i class="fa-brands fa-telegram"></i>
+          </div>
+        </div>
+      </section>
+
+      <!-- Classified Live Attendance Feeds: Students vs Staff -->
+      <section class="feeds-grid">
+        
+        <!-- Column 1: Students Live Attendance Feed -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="status-dot"></span>
+              <h2 style="font-size: 14px; font-weight: 700; color: #1e40af;">
+                <i class="fa-solid fa-graduation-cap" style="margin-right: 4px;"></i> Students Attendance Feed
+              </h2>
+            </div>
+            <span id="student-log-count" class="badge badge-student">0 today</span>
+          </div>
+
+          <div id="student-logs-list" class="panel-body">
+            <div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px;">
+              <i class="fa-regular fa-folder-open" style="font-size: 30px; margin-bottom: 8px; display: block;"></i>
+              No student punches today yet.
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 2: Staff Live Attendance Feed -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="status-dot"></span>
+              <h2 style="font-size: 14px; font-weight: 700; color: var(--indigo);">
+                <i class="fa-solid fa-user-tie" style="margin-right: 4px;"></i> Staff Attendance Feed
+              </h2>
+            </div>
+            <span id="staff-log-count" class="badge badge-staff">0 today</span>
+          </div>
+
+          <div id="staff-logs-list" class="panel-body">
+            <div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px;">
+              <i class="fa-regular fa-folder-open" style="font-size: 30px; margin-bottom: 8px; display: block;"></i>
+              No staff punches today yet.
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Member Directory with Role Filter Tabs -->
+      <section class="panel-card full-width">
+        <div class="panel-header">
+          <div>
+            <h2 style="font-size: 15px; font-weight: 700;">Member Directory</h2>
+            <p style="font-size: 11px; color: var(--text-muted);">Manage student & staff profiles, RFID tags, and manual overrides</p>
+          </div>
+          
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <!-- Role Filter Tabs -->
+            <div class="tabs-wrap">
+              <button type="button" class="tab-btn active" onclick="setRoleTab('all', this)">All</button>
+              <button type="button" class="tab-btn" onclick="setRoleTab('student', this)">Students</button>
+              <button type="button" class="tab-btn" onclick="setRoleTab('staff', this)">Staff</button>
+            </div>
+
+            <input 
+              type="text" 
+              id="search-input" 
+              oninput="filterDirectory()" 
+              placeholder="Search name or ID..."
+              style="width: 200px; padding: 6px 12px; font-size: 12px;"
+            />
+            <button type="button" onclick="openAddUserModal()" class="btn btn-primary" style="padding: 6px 12px; font-size: 12px;">
+              <i class="fa-solid fa-plus"></i> Add User
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-body">
+          <table>
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Role</th>
+                <th>RFID UID</th>
+                <th>Parent Phone / Telegram</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="directory-body">
+              <!-- Injected via JavaScript -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ======================== ADD USER MODAL ======================== -->
+  <div id="add-user-modal" class="modal-overlay hidden">
+    <div class="modal-card wide">
+      <div class="modal-header">
+        <h3 style="font-size: 16px; font-weight: 800;">Enroll New Member</h3>
+        <button type="button" onclick="closeAddUserModal()" style="border: none; background: transparent; cursor: pointer; color: var(--text-muted); font-size: 16px;"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <form onsubmit="handleCreateUser(event)">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="new-name" required placeholder="e.g. Rahul Sharma" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Role</label>
+            <select id="new-role" onchange="updateIdHint()">
+              <option value="student">Student</option>
+              <option value="staff">Staff</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Numeric ID</label>
+            <input type="number" id="new-id" required placeholder="1001" />
+            <p id="id-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">Students must be >= 1000</p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Parent Phone (for Telegram Alerts)</label>
+          <input type="tel" id="new-phone" placeholder="e.g. 9876543210" />
+        </div>
+
+        <div class="form-group">
+          <label>RFID UID (Optional)</label>
+          <input type="text" id="new-rfid" placeholder="Can also pair via Terminal hardware" style="text-transform: uppercase;" />
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+          <button type="button" onclick="closeAddUserModal()" class="btn btn-outline" style="flex: 1;">Cancel</button>
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Save Member</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================== CHANGE PIN MODAL ======================== -->
+  <div id="pin-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-icon-circle warning">
+        <i class="fa-solid fa-key"></i>
+      </div>
+      <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">Update Master PIN</h3>
+      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">Updates the hardware admin keypad unlock PIN</p>
+
+      <form onsubmit="handleUpdatePin(event)">
+        <input 
+          type="text" 
+          id="update-pin-val" 
+          pattern="[0-9]{4,8}" 
+          maxlength="8" 
+          placeholder="New PIN (4-8 digits)" 
+          style="text-align: center; font-size: 20px; font-family: monospace; margin-bottom: 16px;"
+          required 
+        />
+        <div style="display: flex; gap: 8px;">
+          <button type="button" onclick="closePinModal()" class="btn btn-outline" style="flex: 1;">Cancel</button>
+          <button type="submit" class="btn btn-warning" style="flex: 1;">Update PIN</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================== APPLICATION LOGIC ======================== -->
+  <script>
+    const SUPABASE_URL = "https://zznmpmgvvhtmzdknjuqo.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp6bm1wbWd2dmh0bXpka25qdXFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1OTczOTksImV4cCI6MjEwOTE3MzM5OX0.ELBfp5dP9x9lmuzyg16tpAJENEw0ooQ2omTho7b2zWk";
+
+    window.dbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let activeSessionPin = "";
+    let usersCache = [];
+    let logsCache = [];
+    let activeRoleTab = "all";
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const pin = document.getElementById("pin-input").value.trim();
+      const btn = document.getElementById("login-btn");
+      const err = document.getElementById("login-error");
+
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Checking...`;
+      err.classList.add("hidden");
+
+      try {
+        const { data, error } = await window.dbClient.rpc("verify_admin_pin", { p_pin: pin });
+
+        if (error || !data || !data.success) {
+          err.innerText = "Invalid PIN. Access denied.";
+          err.classList.remove("hidden");
+          btn.disabled = false;
+          btn.innerHTML = "Unlock Dashboard";
+        } else {
+          activeSessionPin = pin;
+          document.getElementById("login-modal").classList.add("hidden");
+          document.getElementById("app-container").classList.remove("hidden");
+          initDashboard();
+        }
+      } catch (ex) {
+        err.innerText = "Connection failed. Please check internet connection.";
+        err.classList.remove("hidden");
+        btn.disabled = false;
+        btn.innerHTML = "Unlock Dashboard";
+      }
+    }
+
+    function handleLogout() {
+      activeSessionPin = "";
+      document.getElementById("pin-input").value = "";
+      document.getElementById("app-container").classList.add("hidden");
+      document.getElementById("login-modal").classList.remove("hidden");
+    }
+
+    async function initDashboard() {
+      await fetchUsers();
+      await fetchTodayLogs();
+      setupRealtimeSubscription();
+    }
+
+    async function fetchUsers() {
+      const { data, error } = await window.dbClient
+        .from("users")
+        .select("*")
+        .order("numeric_id", { ascending: true });
+
+      if (!error && data) {
+        usersCache = data;
+        filterDirectory();
+        updateStats();
+      }
+    }
+
+    async function fetchTodayLogs() {
+      const today = new Date().toISOString().split("T")[0];
+      const { data, error } = await window.dbClient
+        .from("attendance_logs")
+        .select(`
+          id,
+          punch_date,
+          punch_time,
+          status,
+          late_minutes,
+          punch_method,
+          users ( id, numeric_id, name, role )
+        `)
+        .eq("punch_date", today)
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        logsCache = data;
+        renderClassifiedLogs(logsCache);
+        updateStats();
+      }
+    }
+
+    function setupRealtimeSubscription() {
+      window.dbClient
+        .channel("admin_attendance_channel")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "attendance_logs" },
+          async () => {
+            await fetchTodayLogs();
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "users" },
+          async () => {
+            await fetchUsers();
+          }
+        )
+        .subscribe();
+    }
+
+    // --- Separate Feeds Renderer ---
+    function renderClassifiedLogs(logs) {
+      const studentLogs = logs.filter(l => l.users?.role === "student");
+      const staffLogs = logs.filter(l => l.users?.role === "staff");
+
+      document.getElementById("student-log-count").innerText = `${studentLogs.length} today`;
+      document.getElementById("staff-log-count").innerText = `${staffLogs.length} today`;
+
+      renderLogList(document.getElementById("student-logs-list"), studentLogs, "No student punches today yet.");
+      renderLogList(document.getElementById("staff-logs-list"), staffLogs, "No staff punches today yet.");
+    }
+
+    function renderLogList(container, logItems, emptyMessage) {
+      if (logItems.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px;">
+            <i class="fa-regular fa-folder-open" style="font-size: 30px; margin-bottom: 8px; display: block;"></i>
+            ${emptyMessage}
+          </div>`;
+        return;
+      }
+
+      container.innerHTML = logItems.map(log => {
+        const isLate = log.status === "LATE";
+        const isOverride = log.punch_method === "ADMIN_OVERRIDE";
+        
+        let statusBadge = `<span class="badge badge-ontime">On-Time</span>`;
+        if (isOverride) {
+          statusBadge = `<span class="badge badge-override">Admin Marked</span>`;
+        } else if (isLate) {
+          statusBadge = `<span class="badge badge-late">Late (${log.late_minutes}m)</span>`;
+        }
+
+        const avatarBg = isLate ? "var(--warning-bg)" : "var(--success-bg)";
+        const avatarColor = isLate ? "var(--warning)" : "var(--success)";
+
+        return `
+          <div class="log-item">
+            <div style="display: flex; align-items: center;">
+              <div class="user-avatar" style="background: ${avatarBg}; color: ${avatarColor};">
+                ${log.users ? log.users.name.charAt(0) : '?'}
+              </div>
+              <div>
+                <h4 style="font-size: 13px; font-weight: 700;">${log.users?.name || 'Unknown'}</h4>
+                <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 6px; align-items: center;">
+                  <span>ID: ${log.users?.numeric_id || 'N/A'}</span>
+                  <span>•</span>
+                  <span style="font-family: monospace; background: #f1f5f9; padding: 1px 4px; border-radius: 4px;">${log.punch_method}</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="text-align: right;">
+              <div>${statusBadge}</div>
+              <p style="font-size: 11px; color: var(--text-muted); font-family: monospace; margin-top: 3px;">
+                ${formatTime(log.punch_time)}
+              </p>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    // --- Directory Renderer with Role Filtering ---
+    function setRoleTab(role, btnElement) {
+      activeRoleTab = role;
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      btnElement.classList.add("active");
+      filterDirectory();
+    }
+
+    function filterDirectory() {
+      const q = document.getElementById("search-input").value.toLowerCase();
+      const filtered = usersCache.filter(u => {
+        const matchesRole = activeRoleTab === "all" || u.role === activeRoleTab;
+        const matchesQuery = u.name.toLowerCase().includes(q) || String(u.numeric_id).includes(q);
+        return matchesRole && matchesQuery;
+      });
+
+      renderDirectory(filtered);
+    }
+
+    function renderDirectory(users) {
+      const tbody = document.getElementById("directory-body");
+      if (users.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 40px; color: var(--text-muted);">No members found in this category.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = users.map(user => {
+        const hasTg = !!user.telegram_chat_id;
+        const hasCard = !!user.rfid_uid;
+
+        return `
+          <tr>
+            <td>
+              <span style="font-weight: 700;">${user.name}</span>
+              <p style="font-size: 11px; color: var(--text-muted); font-family: monospace;">ID: ${user.numeric_id}</p>
+            </td>
+            <td>
+              <span class="badge ${user.role === 'staff' ? 'badge-staff' : 'badge-student'}">
+                ${user.role}
+              </span>
+            </td>
+            <td>
+              ${hasCard 
+                ? `<span style="font-family: monospace; font-size: 11px; font-weight: 700; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-color);">${user.rfid_uid}</span>`
+                : `<span style="font-size: 11px; color: var(--danger); font-style: italic;"><i class="fa-solid fa-triangle-exclamation"></i> Unassigned</span>`
+              }
+            </td>
+            <td>
+              <div style="font-size: 12px;">
+                <span>${user.parent_phone || 'None'}</span>
+                ${hasTg 
+                  ? `<span style="color: #0284c7; margin-left: 4px; font-weight: 600;"><i class="fa-brands fa-telegram"></i> Active</span>`
+                  : `<span style="color: var(--text-muted); margin-left: 4px;"><i class="fa-regular fa-clock"></i> Pending</span>`
+                }
+              </div>
+            </td>
+            <td style="text-align: right;">
+              <button 
+                type="button"
+                onclick="manualAttendanceOverride(${user.numeric_id}, '${user.name.replace(/'/g, "\\'")}')" 
+                class="btn btn-outline" 
+                style="padding: 4px 8px; font-size: 11px; color: var(--primary);"
+                title="Mark Present (Forgot Card)"
+              >
+                <i class="fa-solid fa-clipboard-check"></i> Mark
+              </button>
+
+              ${hasCard ? `
+                <button 
+                  type="button"
+                  onclick="unlinkCard(${user.numeric_id})" 
+                  class="btn btn-danger-light" 
+                  style="padding: 4px 8px; font-size: 11px; margin-left: 4px;"
+                  title="Unlink Card"
+                >
+                  <i class="fa-solid fa-unlink"></i>
+                </button>
+              ` : ''}
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function updateStats() {
+      const studentPresent = logsCache.filter(l => l.users?.role === "student").length;
+      const staffPresent = logsCache.filter(l => l.users?.role === "staff").length;
+      const onTime = logsCache.filter(l => l.status === "ON_TIME").length;
+      const late = logsCache.filter(l => l.status === "LATE").length;
+      const telegramPaired = usersCache.filter(u => u.telegram_chat_id).length;
+
+      document.getElementById("stat-students").innerText = studentPresent;
+      document.getElementById("stat-staff").innerText = staffPresent;
+      document.getElementById("stat-ontime").innerText = onTime;
+      document.getElementById("stat-late").innerText = late;
+      document.getElementById("stat-telegram").innerText = `${telegramPaired} / ${usersCache.length}`;
+    }
+
+    async function manualAttendanceOverride(numericId, name) {
+      if (!confirm(`Mark manual attendance for ${name} (ID: ${numericId})?\n\nA 'Card Forgotten' alert will be sent to the parent via Telegram.`)) {
+        return;
+      }
+
+      const { data, error } = await window.dbClient.rpc("process_attendance", {
+        p_identifier: String(numericId),
+        p_method: "ADMIN_OVERRIDE"
+      });
+
+      if (error) {
+        alert("Server error: " + error.message);
+      } else if (!data.success) {
+        alert("Attendance Failed: " + data.line2);
+      } else {
+        alert(`Success! Marked present: ${data.name}`);
+        fetchTodayLogs();
+      }
+    }
+
+    async function unlinkCard(numericId) {
+      if (!confirm(`Are you sure you want to unlink the RFID tag from ID ${numericId}?`)) return;
+
+      const { error } = await window.dbClient
+        .from("users")
+        .update({ rfid_uid: null })
+        .eq("numeric_id", numericId);
+
+      if (error) {
+        alert("Failed to unlink: " + error.message);
+      } else {
+        await fetchUsers();
+      }
+    }
+
+    async function handleCreateUser(e) {
+      e.preventDefault();
+      const name = document.getElementById("new-name").value.trim();
+      const role = document.getElementById("new-role").value;
+      const numericId = parseInt(document.getElementById("new-id").value);
+      const phone = document.getElementById("new-phone").value.trim() || null;
+      let rfid = document.getElementById("new-rfid").value.trim().toUpperCase() || null;
+
+      if (role === 'staff' && (numericId < 1 || numericId > 999)) {
+        alert("Staff numeric ID must be between 1 and 999.");
+        return;
+      }
+      if (role === 'student' && numericId < 1000) {
+        alert("Student numeric ID must be >= 1000.");
+        return;
+      }
+
+      const { error } = await window.dbClient
+        .from("users")
+        .insert([{
+          name: name,
+          role: role,
+          numeric_id: numericId,
+          parent_phone: phone,
+          rfid_uid: rfid
+        }]);
+
+      if (error) {
+        alert("Error creating user: " + error.message);
+      } else {
+        closeAddUserModal();
+        await fetchUsers();
+      }
+    }
+
+    async function handleUpdatePin(e) {
+      e.preventDefault();
+      const newPin = document.getElementById("update-pin-val").value.trim();
+
+      const { data, error } = await window.dbClient.rpc("update_admin_pin", {
+        p_current_pin: activeSessionPin,
+        p_new_pin: newPin
+      });
+
+      if (error) {
+        alert("Failed to update PIN: " + error.message);
+      } else if (!data.success) {
+        alert("PIN Update Error: " + data.msg);
+      } else {
+        activeSessionPin = newPin;
+        alert(`Admin PIN updated to: ${newPin}\nThis takes effect immediately on both this dashboard and the ESP32 terminal.`);
+        closePinModal();
+      }
+    }
+
+    function exportTodayCSV() {
+      if (logsCache.length === 0) {
+        alert("No attendance punches recorded today to export.");
+        return;
+      }
+
+      const today = new Date().toISOString().split("T")[0];
+      let csvContent = "data:text/csv;charset=utf-8,";
+      csvContent += "Log ID,Name,Role,Numeric ID,Date,Time (IST),Status,Late Minutes,Punch Method\r\n";
+
+      logsCache.forEach(l => {
+        const formattedDisplayTime = formatTime(l.punch_time);
+
+        const row = [
+          l.id,
+          `"${l.users?.name || 'Unknown'}"`,
+          l.users?.role || '',
+          l.users?.numeric_id || '',
+          l.punch_date,
+          `"${formattedDisplayTime}"`,
+          l.status,
+          l.late_minutes,
+          l.punch_method
+        ];
+        csvContent += row.join(",") + "\r\n";
+      });
+
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `attendance_export_${today}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function openAddUserModal() {
+      document.getElementById("add-user-modal").classList.remove("hidden");
+    }
+    function closeAddUserModal() {
+      document.getElementById("add-user-modal").classList.add("hidden");
+    }
+    function openPinModal() {
+      document.getElementById("pin-modal").classList.remove("hidden");
+    }
+    function closePinModal() {
+      document.getElementById("pin-modal").classList.add("hidden");
+    }
+    function updateIdHint() {
+      const role = document.getElementById("new-role").value;
+      const hint = document.getElementById("id-hint");
+      hint.innerText = role === 'staff' ? 'Staff must be 1 - 999' : 'Students must be >= 1000';
+    }
+    function formatTime(timeStr) {
+      if (!timeStr) return "";
+      const [h, m] = timeStr.split(":");
+      const d = new Date();
+      d.setHours(+h);
+      d.setMinutes(+m);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+  </script>
+</body>
+</html>

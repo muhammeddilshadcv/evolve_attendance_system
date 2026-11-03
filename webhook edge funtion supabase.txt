@@ -1,0 +1,109 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+
+const BOT_TOKEN = "9052258462:AAGxUwOwUBTH84_HDgiL1YoACAWFwMm-8Tk";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+serve(async (req) => {
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  try {
+    const update = await req.json();
+    console.log("Incoming Telegram Update:", JSON.stringify(update));
+
+    if (!update.message) {
+      return new Response("No message in update", { status: 200 });
+    }
+
+    const chatId = update.message.chat.id;
+    const text = update.message.text;
+    const contact = update.message.contact;
+
+    // 1. Handle /start command
+    if (text && text.startsWith("/start")) {
+      const tgRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "Welcome to the School Attendance Portal!\n\nPlease tap the button below to link your registered mobile number.",
+          reply_markup: {
+            keyboard: [
+              [
+                {
+                  text: "📱 Share Phone Number to Verify",
+                  request_contact: true
+                }
+              ]
+            ],
+            resize_keyboard: true,
+            one_time_keyboard: true
+          }
+        })
+      });
+
+      const tgData = await tgRes.json();
+      console.log("Telegram /start response:", JSON.stringify(tgData));
+      return new Response("Start handled", { status: 200 });
+    }
+
+    // 2. Handle Contact Sharing
+    if (contact && contact.phone_number) {
+      let rawPhone = contact.phone_number.replace(/\D/g, "");
+      if (rawPhone.length > 10) rawPhone = rawPhone.slice(-10);
+
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+      const { data: matchedUsers, error: dbError } = await supabase
+        .from("users")
+        .select("id, name, numeric_id")
+        .ilike("parent_phone", `%${rawPhone}%`);
+
+      if (dbError) {
+        console.error("DB Query Error:", dbError);
+      }
+
+      if (matchedUsers && matchedUsers.length > 0) {
+        for (const user of matchedUsers) {
+          await supabase
+            .from("users")
+            .update({ telegram_chat_id: chatId })
+            .eq("id", user.id);
+        }
+
+        const studentNames = matchedUsers.map((u) => u.name).join(", ");
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: `✅ Verified successfully!\nLinked Student: ${studentNames} (ID: ${matchedUsers[0].numeric_id}).\n\nYou will now receive daily entry notices here.`,
+            reply_markup: { remove_keyboard: true }
+          })
+        });
+      } else {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: `❌ Phone number (+91...${rawPhone}) is not registered in the school database. Please contact the administration office.`,
+            reply_markup: { remove_keyboard: true }
+          })
+        });
+      }
+
+      return new Response("Contact processed", { status: 200 });
+    }
+
+    return new Response("OK", { status: 200 });
+  } catch (err) {
+    console.error("Webhook runtime error:", err);
+    return new Response(JSON.stringify({ error: err.message }), { 
+      status: 200 
+    });
+  }
+});

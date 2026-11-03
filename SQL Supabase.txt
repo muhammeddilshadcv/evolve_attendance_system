@@ -1,0 +1,375 @@
+-- =====================================================================
+-- 1. EXTENSIONS
+-- =====================================================================
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
+
+-- =====================================================================
+-- 2. MASTER USER DIRECTORY TABLE & RLS
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    numeric_id INT UNIQUE NOT NULL,
+    rfid_uid VARCHAR(32) UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    role VARCHAR(10) NOT NULL CHECK (role IN ('student', 'staff')),
+    parent_phone VARCHAR(15),
+    telegram_chat_id BIGINT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    CONSTRAINT check_id_range CHECK (
+        (role = 'staff' AND numeric_id BETWEEN 1 AND 999) OR
+        (role = 'student' AND numeric_id >= 1000)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_rfid ON users(rfid_uid);
+CREATE INDEX IF NOT EXISTS idx_users_num_id ON users(numeric_id);
+CREATE INDEX IF NOT EXISTS idx_users_parent_phone ON users(parent_phone);
+
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow read access to users" ON users;
+CREATE POLICY "Allow read access to users"
+ON users FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Allow service role full access to users" ON users;
+CREATE POLICY "Allow service role full access to users"
+ON users FOR ALL TO service_role USING (true);
+
+-- =====================================================================
+-- 3. ATTENDANCE LOGS TABLE & RLS
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS attendance_logs (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+    punch_date DATE NOT NULL,
+    punch_time TIME NOT NULL,
+    status VARCHAR(15) NOT NULL CHECK (status IN ('ON_TIME', 'LATE')),
+    late_minutes INT DEFAULT 0,
+    punch_method VARCHAR(20) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    CONSTRAINT unique_user_daily_attendance UNIQUE (user_id, punch_date)
+);
+
+-- Ensure correct allowed punch methods
+ALTER TABLE attendance_logs 
+DROP CONSTRAINT IF EXISTS attendance_logs_punch_method_check;
+
+ALTER TABLE attendance_logs 
+ADD CONSTRAINT attendance_logs_punch_method_check 
+CHECK (punch_method IN ('RFID', 'KEYPAD', 'OFFLINE_SYNC', 'ADMIN_OVERRIDE'));
+
+CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance_logs(punch_date);
+
+ALTER TABLE attendance_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow read access to attendance_logs" ON attendance_logs;
+CREATE POLICY "Allow read access to attendance_logs"
+ON attendance_logs FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Allow service role full access to attendance_logs" ON attendance_logs;
+CREATE POLICY "Allow service role full access to attendance_logs"
+ON attendance_logs FOR ALL TO service_role USING (true);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND tablename = 'attendance_logs'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE attendance_logs;
+    END IF;
+END $$;
+
+-- =====================================================================
+-- 4. SYSTEM CONFIGURATION TABLE & RLS (ADMIN PIN STORAGE)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS system_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO system_config (key, value)
+VALUES ('admin_pin', '1234')
+ON CONFLICT (key) DO NOTHING;
+
+ALTER TABLE system_config ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow read on system_config" ON system_config;
+CREATE POLICY "Allow read on system_config"
+ON system_config FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Allow service role full access to system_config" ON system_config;
+CREATE POLICY "Allow service role full access to system_config"
+ON system_config FOR ALL TO service_role USING (true);
+
+-- =====================================================================
+-- 5. RPC: ATOMIC PUNCH VALIDATION
+-- =====================================================================
+CREATE OR REPLACE FUNCTION process_attendance(
+    p_identifier TEXT,
+    p_method TEXT,
+    p_custom_timestamp TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_user RECORD;
+    v_now_ist TIMESTAMP;
+    v_current_date DATE;
+    v_current_time TIME;
+    v_status TEXT;
+    v_late_mins INT := 0;
+    v_cutoff_time TIME;
+    v_gate_open TIME := '09:00:00'::TIME;
+BEGIN
+    -- Reject standalone public numeric entry; manual entry requires ADMIN_OVERRIDE
+    IF p_method = 'KEYPAD' THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'KEYPAD_DISABLED',
+            'line1', 'Keypad Disabled',
+            'line2', 'Tap Card Only'
+        );
+    END IF;
+
+    -- Evaluate time in Indian Standard Time (IST)
+    IF p_custom_timestamp IS NOT NULL THEN
+        v_now_ist := (p_custom_timestamp AT TIME ZONE 'Asia/Kolkata');
+    ELSE
+        v_now_ist := (NOW() AT TIME ZONE 'Asia/Kolkata');
+    END IF;
+
+    v_current_date := v_now_ist::DATE;
+    v_current_time := v_now_ist::TIME;
+
+    -- Gate Open Window Enforcement (Bypassed for ADMIN_OVERRIDE)
+    IF p_method <> 'ADMIN_OVERRIDE' AND v_current_time < v_gate_open THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'GATE_CLOSED',
+            'line1', 'Gate Closed',
+            'line2', 'Opens at 9:00 AM'
+        );
+    END IF;
+
+    -- Look up student/staff by Numeric ID or RFID UID
+    IF p_identifier ~ '^[0-9]+$' THEN
+        SELECT * INTO v_user FROM users 
+        WHERE numeric_id = p_identifier::INT AND is_active = TRUE;
+    ELSE
+        SELECT * INTO v_user FROM users 
+        WHERE UPPER(rfid_uid) = UPPER(p_identifier) AND is_active = TRUE;
+    END IF;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'USER_NOT_FOUND',
+            'line1', 'Invalid User ID',
+            'line2', 'Access Denied'
+        );
+    END IF;
+
+    -- Prevent duplicate punch for the day
+    IF EXISTS (
+        SELECT 1 FROM attendance_logs 
+        WHERE user_id = v_user.id AND punch_date = v_current_date
+    ) THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'ALREADY_MARKED',
+            'line1', SUBSTRING(v_user.name FROM 1 FOR 16),
+            'line2', 'Already Marked!'
+        );
+    END IF;
+
+    -- Cutoffs: Staff = 09:50 AM, Students = 10:10 AM
+    IF v_user.role = 'staff' THEN
+        v_cutoff_time := '09:50:00'::TIME;
+    ELSE
+        v_cutoff_time := '10:10:00'::TIME;
+    END IF;
+
+    IF v_current_time > v_cutoff_time THEN
+        v_status := 'LATE';
+        v_late_mins := FLOOR(EXTRACT(EPOCH FROM (v_current_time - v_cutoff_time)) / 60);
+    ELSE
+        v_status := 'ON_TIME';
+        v_late_mins := 0;
+    END IF;
+
+    INSERT INTO attendance_logs (
+        user_id, punch_date, punch_time, status, late_minutes, punch_method
+    ) VALUES (
+        v_user.id, v_current_date, v_current_time, v_status, v_late_mins, p_method
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'code', 'MARKED',
+        'name', v_user.name,
+        'role', v_user.role,
+        'status', v_status,
+        'line1', SUBSTRING(v_user.name FROM 1 FOR 16),
+        'line2', CASE 
+                    WHEN p_method = 'ADMIN_OVERRIDE' THEN 'Admin Marked OK'
+                    WHEN v_status = 'ON_TIME' THEN 'Present ' || TO_CHAR(v_now_ist, 'hh12:MI AM')
+                    ELSE 'Late (' || v_late_mins || 'm) ' || TO_CHAR(v_now_ist, 'hh12:MI')
+                 END
+    );
+END;
+$$;
+
+-- =====================================================================
+-- 6. RPC: VERIFY ADMIN PIN
+-- =====================================================================
+CREATE OR REPLACE FUNCTION verify_admin_pin(p_pin TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_actual_pin TEXT;
+BEGIN
+    SELECT value INTO v_actual_pin FROM system_config WHERE key = 'admin_pin';
+    IF v_actual_pin IS NULL THEN v_actual_pin := '1234'; END IF;
+
+    IF p_pin = v_actual_pin THEN
+        RETURN jsonb_build_object('success', true, 'msg', 'PIN Verified');
+    ELSE
+        RETURN jsonb_build_object('success', false, 'msg', 'Invalid PIN');
+    END IF;
+END;
+$$;
+
+-- =====================================================================
+-- 7. RPC: PAIR RFID CARD (ENROLLMENT & COLLISION RESOLUTION)
+-- =====================================================================
+CREATE OR REPLACE FUNCTION pair_rfid_card(
+    p_pin TEXT,
+    p_numeric_id INT,
+    p_rfid_uid TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_actual_pin TEXT;
+    v_existing_holder TEXT;
+    v_target_user_name TEXT;
+    v_clean_uid TEXT;
+BEGIN
+    SELECT value INTO v_actual_pin FROM system_config WHERE key = 'admin_pin';
+    IF p_pin <> COALESCE(v_actual_pin, '1234') THEN
+        RETURN jsonb_build_object(
+            'success', false, 
+            'code', 'BAD_PIN', 
+            'line1', 'Access Denied', 
+            'line2', 'Incorrect PIN'
+        );
+    END IF;
+
+    v_clean_uid := UPPER(TRIM(p_rfid_uid));
+
+    SELECT name INTO v_target_user_name FROM users WHERE numeric_id = p_numeric_id;
+    IF v_target_user_name IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false, 
+            'code', 'USER_NOT_FOUND', 
+            'line1', 'Error: Not Found', 
+            'line2', 'ID Does Not Exist'
+        );
+    END IF;
+
+    -- Collision check: Ensure UID is not currently held by another user
+    SELECT name INTO v_existing_holder 
+    FROM users 
+    WHERE UPPER(rfid_uid) = v_clean_uid AND numeric_id <> p_numeric_id 
+    LIMIT 1;
+
+    IF v_existing_holder IS NOT NULL THEN
+        RETURN jsonb_build_object(
+            'success', false, 
+            'code', 'CARD_IN_USE', 
+            'line1', 'Card In Use!', 
+            'line2', SUBSTRING(v_existing_holder FROM 1 FOR 16)
+        );
+    END IF;
+
+    UPDATE users
+    SET rfid_uid = v_clean_uid
+    WHERE numeric_id = p_numeric_id;
+
+    RETURN jsonb_build_object(
+        'success', true, 
+        'code', 'PAIRED', 
+        'line1', 'Pair Successful!', 
+        'line2', SUBSTRING(v_target_user_name FROM 1 FOR 16)
+    );
+END;
+$$;
+
+-- =====================================================================
+-- 8. TRIGGER: NOTIFY TELEGRAM PARENT
+-- =====================================================================
+CREATE OR REPLACE FUNCTION notify_telegram_parent()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_user RECORD;
+    v_message TEXT;
+    v_bot_token TEXT := '9052258462:AAGxUwOwUBTH84_HDgiL1YoACAWFwMm-8Tk';
+    v_url TEXT;
+BEGIN
+    SELECT * INTO v_user FROM users WHERE id = NEW.user_id;
+
+    IF v_user.role = 'student' AND v_user.telegram_chat_id IS NOT NULL THEN
+        IF NEW.punch_method = 'ADMIN_OVERRIDE' THEN
+            v_message := '⚠️ *Notice: ID Card Forgotten*' || E'\n\n' ||
+                         'Student: *' || v_user.name || '* (ID: ' || v_user.numeric_id || ')' || E'\n' ||
+                         'Status: *Present (Admin Marked)*' || E'\n' ||
+                         'Arrival Time: ' || TO_CHAR(NEW.punch_time, 'HH12:MI AM') || ' IST' || E'\n\n' ||
+                         '📌 *Note:* Your ward forgot their physical ID card today. Attendance was marked manually by the administrator.';
+        ELSIF NEW.status = 'ON_TIME' THEN
+            v_message := '✅ *Attendance Notice*' || E'\n\n' ||
+                         'Student: *' || v_user.name || '* (ID: ' || v_user.numeric_id || ')' || E'\n' ||
+                         'Status: *Present (On-Time)*' || E'\n' ||
+                         'Arrival Time: ' || TO_CHAR(NEW.punch_time, 'HH12:MI AM') || ' IST';
+        ELSE
+            v_message := '⚠️ *Late Arrival Alert*' || E'\n\n' ||
+                         'Student: *' || v_user.name || '* (ID: ' || v_user.numeric_id || ')' || E'\n' ||
+                         'Status: *Late by ' || NEW.late_minutes || ' minutes*' || E'\n' ||
+                         'Arrival Time: ' || TO_CHAR(NEW.punch_time, 'HH12:MI AM') || ' IST';
+        END IF;
+
+        v_url := 'https://api.telegram.org/bot' || v_bot_token || '/sendMessage';
+
+        PERFORM net.http_post(
+            url := v_url,
+            headers := jsonb_build_object('Content-Type', 'application/json'),
+            body := jsonb_build_object(
+                'chat_id', v_user.telegram_chat_id,
+                'text', v_message,
+                'parse_mode', 'Markdown'
+            )
+        );
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_attendance_telegram_alert ON attendance_logs;
+CREATE TRIGGER tr_attendance_telegram_alert
+AFTER INSERT ON attendance_logs
+FOR EACH ROW
+EXECUTE FUNCTION notify_telegram_parent();
